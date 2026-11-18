@@ -24,10 +24,11 @@ class MainActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     val context = LocalContext.current
                     val url by ServerSettings.serverUrl(context).collectAsState(initial = "")
-                    if (url.isNullOrEmpty()) {
-                        ServerSetupScreen(onSaved = {})
-                    } else {
-                        Accueil()
+                    val token by ServerSettings.token(context).collectAsState(initial = "")
+                    when {
+                        url.isNullOrEmpty() -> ServerSetupScreen(onSaved = {})
+                        token.isNullOrEmpty() -> LoginScreen(baseUrl = url.orEmpty(), onLoggedIn = {})
+                        else -> Accueil()
                     }
                 }
             }
@@ -38,6 +39,6 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun Accueil() {
     Column(modifier = Modifier.padding(24.dp)) {
-        Text("Mutualisons : le projet démarre.")
+        Text("Mutualisons : connecté.")
     }
 }

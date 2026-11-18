@@ -12,8 +12,8 @@ android {
         applicationId = "fr.jc14fr.mutualisons"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 3
+        versionName = "0.2.0"
     }
 
     buildTypes {
@@ -35,4 +35,5 @@ dependencies {
     implementation(libs.androidx.ui)
     implementation(libs.androidx.material3)
     implementation(libs.androidx.datastore.preferences)
+    implementation(libs.okhttp)
 }

@@ -11,12 +11,24 @@ private val Context.dataStore by preferencesDataStore(name = "settings")
 
 object ServerSettings {
     private val KEY_URL = stringPreferencesKey("server_url")
+    private val KEY_TOKEN = stringPreferencesKey("auth_token")
 
     fun serverUrl(context: Context): Flow<String?> =
         context.dataStore.data.map { it[KEY_URL] }
 
     suspend fun saveServerUrl(context: Context, url: String) {
         context.dataStore.edit { it[KEY_URL] = url.trimEnd('/') }
+    }
+
+    fun token(context: Context): Flow<String?> =
+        context.dataStore.data.map { it[KEY_TOKEN] }
+
+    suspend fun saveToken(context: Context, token: String) {
+        context.dataStore.edit { it[KEY_TOKEN] = token }
+    }
+
+    suspend fun clearToken(context: Context) {
+        context.dataStore.edit { it.remove(KEY_TOKEN) }
     }
 }
 
