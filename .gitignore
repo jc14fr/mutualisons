@@ -1,0 +1,10 @@
+build/
+.gradle/
+local.properties
+*.iml
+.idea/
+.kotlin/
+pb_data/
+.DS_Store
+server/.env
+server/.env
