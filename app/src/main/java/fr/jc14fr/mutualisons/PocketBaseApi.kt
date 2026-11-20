@@ -6,6 +6,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -24,7 +25,9 @@ object PocketBaseApi {
         val id: String,
         val title: String,
         val category: String,
-        val status: String
+        val status: String,
+        val owner: String = "",
+        val circles: List<String> = emptyList()
     )
 
     data class Circle(val id: String, val name: String)
@@ -89,7 +92,7 @@ object PocketBaseApi {
     suspend fun listItems(baseUrl: String, token: String): List<Item> =
         withContext(Dispatchers.IO) {
             val request = Request.Builder()
-                .url("$baseUrl/api/collections/items/records?perPage=100&sort=title&fields=id,title,category,status")
+                .url("$baseUrl/api/collections/items/records?perPage=100&sort=title&fields=id,title,category,status,owner,circles")
                 .header("Authorization", token)
                 .get()
                 .build()
@@ -101,11 +104,14 @@ object PocketBaseApi {
                 val arr = JSONObject(text).getJSONArray("items")
                 List(arr.length()) { i ->
                     val o = arr.getJSONObject(i)
+                    val ca = o.optJSONArray("circles")
                     Item(
                         id = o.getString("id"),
                         title = o.optString("title"),
                         category = o.optString("category"),
-                        status = o.optString("status")
+                        status = o.optString("status"),
+                        owner = o.optString("owner"),
+                        circles = if (ca == null) emptyList() else List(ca.length()) { ca.getString(it) }
                     )
                 }
             }
@@ -203,6 +209,90 @@ object PocketBaseApi {
                 if (response.code == 401) throw AuthExpiredException()
                 if (!response.isSuccessful) throw IOException(messageOf(text, response.code))
                 JSONObject(text).getString("code")
+            }
+        }
+
+    suspend fun createItem(
+        baseUrl: String,
+        token: String,
+        title: String,
+        category: String,
+        circleIds: List<String>,
+        userId: String
+    ): String =
+        withContext(Dispatchers.IO) {
+            val body = JSONObject()
+                .put("owner", userId)
+                .put("circles", JSONArray(circleIds))
+                .put("title", title)
+                .put("category", category)
+                .put("status", "available")
+                .toString()
+                .toRequestBody(JSON_TYPE)
+
+            val request = Request.Builder()
+                .url("$baseUrl/api/collections/items/records")
+                .header("Authorization", token)
+                .post(body)
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                val text = response.body?.string().orEmpty()
+                if (response.code == 401) throw AuthExpiredException()
+                if (!response.isSuccessful) throw IOException(messageOf(text, response.code))
+                JSONObject(text).getString("id")
+            }
+        }
+
+    suspend fun updateItemCircles(baseUrl: String, token: String, itemId: String, circleIds: List<String>) =
+        withContext(Dispatchers.IO) {
+            val body = JSONObject().put("circles", JSONArray(circleIds)).toString().toRequestBody(JSON_TYPE)
+            val request = Request.Builder()
+                .url("$baseUrl/api/collections/items/records/$itemId")
+                .header("Authorization", token)
+                .patch(body)
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                val text = response.body?.string().orEmpty()
+                if (response.code == 401) throw AuthExpiredException()
+                if (!response.isSuccessful) throw IOException(messageOf(text, response.code))
+            }
+        }
+
+    suspend fun deleteItem(baseUrl: String, token: String, itemId: String) =
+        withContext(Dispatchers.IO) {
+            val request = Request.Builder()
+                .url("$baseUrl/api/collections/items/records/$itemId")
+                .header("Authorization", token)
+                .delete()
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                val text = response.body?.string().orEmpty()
+                if (response.code == 401) throw AuthExpiredException()
+                if (!response.isSuccessful) throw IOException(messageOf(text, response.code))
+            }
+        }
+            suspend fun createCircle(baseUrl: String, token: String, name: String): String =
+        withContext(Dispatchers.IO) {
+            // Pas de champ members : le serveur y met le créateur automatiquement
+            val body = JSONObject()
+                .put("name", name.trim())
+                .toString()
+                .toRequestBody(JSON_TYPE)
+
+            val request = Request.Builder()
+                .url("$baseUrl/api/collections/circles/records")
+                .header("Authorization", token)
+                .post(body)
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                val text = response.body?.string().orEmpty()
+                if (response.code == 401) throw AuthExpiredException()
+                if (!response.isSuccessful) throw IOException(messageOf(text, response.code))
+                JSONObject(text).getString("name")
             }
         }
 }
