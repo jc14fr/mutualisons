@@ -10,19 +10,21 @@ routerAdd("POST", "/api/mutualisons/leave", (e) => {
 
     const enCours = $app.findRecordsByFilter(
         "loans",
-        "returned_at = '' && (lender = {:u} || borrower = {:u}) && item.circle = {:c}",
+        "returned_at = '' && (lender = {:u} || borrower = {:u}) && item.circles.id ?= {:c}",
         "", 1, 0, { u: e.auth.id, c: circleId }
     );
     if (enCours.length > 0) {
         throw new BadRequestError("Un prêt est en cours dans ce cercle. Rendez-le avant de partir.");
     }
 
+    // Vos objets restent à vous : on retire seulement ce cercle de leur partage
     const mesObjets = $app.findRecordsByFilter(
-        "items", "circle = {:c} && owner = {:u}", "", 500, 0,
-        { c: circleId, u: e.auth.id }
+        "items", "owner = {:u} && circles.id ?= {:c}", "", 500, 0,
+        { u: e.auth.id, c: circleId }
     );
     mesObjets.forEach((item) => {
-        item.set("circle", "");
+        const restants = item.getStringSlice("circles").filter((id) => id !== circleId);
+        item.set("circles", restants);
         $app.save(item);
     });
 
