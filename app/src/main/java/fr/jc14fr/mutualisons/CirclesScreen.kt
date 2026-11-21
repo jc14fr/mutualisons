@@ -1,5 +1,6 @@
 package fr.jc14fr.mutualisons
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -50,6 +51,9 @@ fun CirclesScreen(baseUrl: String, token: String, onSessionExpired: () -> Unit) 
     var joining by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
     var creating by remember { mutableStateOf(false) }
+    var openCircle by remember { mutableStateOf<PocketBaseApi.Circle?>(null) }
+    var members by remember { mutableStateOf<List<PocketBaseApi.Member>>(emptyList()) }
+    var membersLoading by remember { mutableStateOf(false) }
 
     LaunchedEffect(reload) {
         loading = true
@@ -64,6 +68,35 @@ fun CirclesScreen(baseUrl: String, token: String, onSessionExpired: () -> Unit) 
             error = "Chargement impossible : ${e.message}"
         }
         loading = false
+    }
+
+    openCircle?.let { circle ->
+        AlertDialog(
+            onDismissRequest = { openCircle = null },
+            title = { Text(circle.name) },
+            text = {
+                Column {
+                    if (membersLoading) {
+                        CircularProgressIndicator()
+                    } else if (members.isEmpty()) {
+                        Text("Aucun membre affiché.")
+                    } else {
+                        Text(
+                            "${members.size} membre(s)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        members.forEach { m ->
+                            Text("• ${m.name}", style = MaterialTheme.typography.bodyLarge)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { openCircle = null }) { Text("Fermer") }
+            }
+        )
     }
 
     toLeave?.let { circle ->
@@ -112,7 +145,6 @@ fun CirclesScreen(baseUrl: String, token: String, onSessionExpired: () -> Unit) 
 
         Spacer(Modifier.height(8.dp))
 
-        // Création d'un cercle
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("Créer un cercle", style = MaterialTheme.typography.titleSmall)
@@ -154,7 +186,6 @@ fun CirclesScreen(baseUrl: String, token: String, onSessionExpired: () -> Unit) 
 
         Spacer(Modifier.height(12.dp))
 
-        // Rejoindre avec un code
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("Rejoindre un cercle", style = MaterialTheme.typography.titleSmall)
@@ -225,7 +256,36 @@ fun CirclesScreen(baseUrl: String, token: String, onSessionExpired: () -> Unit) 
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(circle.name, style = MaterialTheme.typography.titleMedium)
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable {
+                                        openCircle = circle
+                                        membersLoading = true
+                                        members = emptyList()
+                                        scope.launch {
+                                            try {
+                                                members = PocketBaseApi.listMembers(baseUrl, token, circle.id)
+                                            } catch (e: AuthExpiredException) {
+                                                ServerSettings.clearToken(context)
+                                                onSessionExpired()
+                                            } catch (e: Exception) {
+                                                error = e.message
+                                                openCircle = null
+                                            }
+                                            membersLoading = false
+                                        }
+                                    }
+                            ) {
+                                Text(circle.name, style = MaterialTheme.typography.titleMedium)
+                                if (circle.creatorName.isNotBlank()) {
+                                    Text(
+                                        "créé par ${circle.creatorName}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
                             Row {
                                 TextButton(onClick = {
                                     scope.launch {

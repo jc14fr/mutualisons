@@ -9,6 +9,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
+import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 class AuthExpiredException : IOException("session expirée")
@@ -27,10 +28,39 @@ object PocketBaseApi {
         val category: String,
         val status: String,
         val owner: String = "",
+        val ownerName: String = "",
         val circles: List<String> = emptyList()
     )
 
-    data class Circle(val id: String, val name: String)
+    data class Circle(
+        val id: String,
+        val name: String,
+        val creatorName: String = ""
+    )
+
+    data class Member(val id: String, val name: String)
+
+    data class Me(val id: String, val name: String, val email: String)
+
+    data class ActiveLoan(
+        val id: String,
+        val borrowerId: String,
+        val lenderId: String,
+        val borrowerName: String,
+        val lenderName: String,
+        val startDate: String,
+        val dueDate: String,
+        val started: Boolean
+    )
+
+    data class Req(
+        val id: String,
+        val itemTitle: String,
+        val requesterId: String,
+        val requesterName: String,
+        val ownerId: String,
+        val status: String
+    )
 
     private fun messageOf(text: String, code: Int): String {
         return try {
@@ -55,12 +85,10 @@ object PocketBaseApi {
                 .put("password", password)
                 .toString()
                 .toRequestBody(JSON_TYPE)
-
             val request = Request.Builder()
                 .url("$baseUrl/api/collections/users/auth-with-password")
                 .post(body)
                 .build()
-
             client.newCall(request).execute().use { response ->
                 val text = response.body?.string().orEmpty()
                 if (!response.isSuccessful) throw IOException(messageOf(text, response.code))
@@ -77,14 +105,62 @@ object PocketBaseApi {
                 .put("passwordConfirm", password)
                 .toString()
                 .toRequestBody(JSON_TYPE)
-
             val request = Request.Builder()
                 .url("$baseUrl/api/collections/users/records")
                 .post(body)
                 .build()
-
             client.newCall(request).execute().use { response ->
                 val text = response.body?.string().orEmpty()
+                if (!response.isSuccessful) throw IOException(messageOf(text, response.code))
+            }
+        }
+
+    suspend fun currentUserId(baseUrl: String, token: String): String =
+        withContext(Dispatchers.IO) {
+            val request = Request.Builder()
+                .url("$baseUrl/api/collections/users/auth-refresh")
+                .header("Authorization", token)
+                .post("".toRequestBody(JSON_TYPE))
+                .build()
+            client.newCall(request).execute().use { response ->
+                val text = response.body?.string().orEmpty()
+                if (response.code == 401) throw AuthExpiredException()
+                if (!response.isSuccessful) throw IOException(messageOf(text, response.code))
+                JSONObject(text).getJSONObject("record").getString("id")
+            }
+        }
+
+    suspend fun currentUser(baseUrl: String, token: String): Me =
+        withContext(Dispatchers.IO) {
+            val request = Request.Builder()
+                .url("$baseUrl/api/collections/users/auth-refresh")
+                .header("Authorization", token)
+                .post("".toRequestBody(JSON_TYPE))
+                .build()
+            client.newCall(request).execute().use { response ->
+                val text = response.body?.string().orEmpty()
+                if (response.code == 401) throw AuthExpiredException()
+                if (!response.isSuccessful) throw IOException(messageOf(text, response.code))
+                val r = JSONObject(text).getJSONObject("record")
+                Me(r.getString("id"), r.optString("name"), r.optString("email"))
+            }
+        }
+
+    suspend fun updateProfile(baseUrl: String, token: String, userId: String, name: String, email: String) =
+        withContext(Dispatchers.IO) {
+            val body = JSONObject()
+                .put("name", name.trim())
+                .put("email", email.trim())
+                .toString()
+                .toRequestBody(JSON_TYPE)
+            val request = Request.Builder()
+                .url("$baseUrl/api/collections/users/records/$userId")
+                .header("Authorization", token)
+                .patch(body)
+                .build()
+            client.newCall(request).execute().use { response ->
+                val text = response.body?.string().orEmpty()
+                if (response.code == 401) throw AuthExpiredException()
                 if (!response.isSuccessful) throw IOException(messageOf(text, response.code))
             }
         }
@@ -92,11 +168,10 @@ object PocketBaseApi {
     suspend fun listItems(baseUrl: String, token: String): List<Item> =
         withContext(Dispatchers.IO) {
             val request = Request.Builder()
-                .url("$baseUrl/api/collections/items/records?perPage=100&sort=title&fields=id,title,category,status,owner,circles")
+                .url("$baseUrl/api/collections/items/records?perPage=100&sort=title&expand=owner&fields=id,title,category,status,owner,circles,expand")
                 .header("Authorization", token)
                 .get()
                 .build()
-
             client.newCall(request).execute().use { response ->
                 val text = response.body?.string().orEmpty()
                 if (response.code == 401) throw AuthExpiredException()
@@ -105,12 +180,14 @@ object PocketBaseApi {
                 List(arr.length()) { i ->
                     val o = arr.getJSONObject(i)
                     val ca = o.optJSONArray("circles")
+                    val ownerName = o.optJSONObject("expand")?.optJSONObject("owner")?.optString("name").orEmpty()
                     Item(
                         id = o.getString("id"),
                         title = o.optString("title"),
                         category = o.optString("category"),
                         status = o.optString("status"),
                         owner = o.optString("owner"),
+                        ownerName = ownerName,
                         circles = if (ca == null) emptyList() else List(ca.length()) { ca.getString(it) }
                     )
                 }
@@ -120,11 +197,10 @@ object PocketBaseApi {
     suspend fun listCircles(baseUrl: String, token: String): List<Circle> =
         withContext(Dispatchers.IO) {
             val request = Request.Builder()
-                .url("$baseUrl/api/collections/circles/records?perPage=100&sort=name&fields=id,name")
+                .url("$baseUrl/api/collections/circles/records?perPage=100&sort=name&expand=creator&fields=id,name,creator,expand")
                 .header("Authorization", token)
                 .get()
                 .build()
-
             client.newCall(request).execute().use { response ->
                 val text = response.body?.string().orEmpty()
                 if (response.code == 401) throw AuthExpiredException()
@@ -132,8 +208,44 @@ object PocketBaseApi {
                 val arr = JSONObject(text).getJSONArray("items")
                 List(arr.length()) { i ->
                     val o = arr.getJSONObject(i)
-                    Circle(id = o.getString("id"), name = o.optString("name"))
+                    val creator = o.optJSONObject("expand")?.optJSONObject("creator")?.optString("name").orEmpty()
+                    Circle(id = o.getString("id"), name = o.optString("name"), creatorName = creator)
                 }
+            }
+        }
+
+    suspend fun listMembers(baseUrl: String, token: String, circleId: String): List<Member> =
+        withContext(Dispatchers.IO) {
+            val request = Request.Builder()
+                .url("$baseUrl/api/collections/circles/records/$circleId?expand=members&fields=id,members,expand")
+                .header("Authorization", token)
+                .get()
+                .build()
+            client.newCall(request).execute().use { response ->
+                val text = response.body?.string().orEmpty()
+                if (response.code == 401) throw AuthExpiredException()
+                if (!response.isSuccessful) throw IOException(messageOf(text, response.code))
+                val arr = JSONObject(text).optJSONObject("expand")?.optJSONArray("members") ?: JSONArray()
+                List(arr.length()) { i ->
+                    val o = arr.getJSONObject(i)
+                    Member(id = o.getString("id"), name = o.optString("name").ifBlank { "Membre" })
+                }
+            }
+        }
+
+    suspend fun createCircle(baseUrl: String, token: String, name: String): String =
+        withContext(Dispatchers.IO) {
+            val body = JSONObject().put("name", name.trim()).toString().toRequestBody(JSON_TYPE)
+            val request = Request.Builder()
+                .url("$baseUrl/api/collections/circles/records")
+                .header("Authorization", token)
+                .post(body)
+                .build()
+            client.newCall(request).execute().use { response ->
+                val text = response.body?.string().orEmpty()
+                if (response.code == 401) throw AuthExpiredException()
+                if (!response.isSuccessful) throw IOException(messageOf(text, response.code))
+                JSONObject(text).getString("name")
             }
         }
 
@@ -145,7 +257,6 @@ object PocketBaseApi {
                 .header("Authorization", token)
                 .post(body)
                 .build()
-
             client.newCall(request).execute().use { response ->
                 val text = response.body?.string().orEmpty()
                 if (response.code == 401) throw AuthExpiredException()
@@ -161,28 +272,11 @@ object PocketBaseApi {
                 .header("Authorization", token)
                 .post(body)
                 .build()
-
             client.newCall(request).execute().use { response ->
                 val text = response.body?.string().orEmpty()
                 if (response.code == 401) throw AuthExpiredException()
                 if (!response.isSuccessful) throw IOException(messageOf(text, response.code))
                 JSONObject(text).optString("name")
-            }
-        }
-
-    suspend fun currentUserId(baseUrl: String, token: String): String =
-        withContext(Dispatchers.IO) {
-            val request = Request.Builder()
-                .url("$baseUrl/api/collections/users/auth-refresh")
-                .header("Authorization", token)
-                .post("".toRequestBody(JSON_TYPE))
-                .build()
-
-            client.newCall(request).execute().use { response ->
-                val text = response.body?.string().orEmpty()
-                if (response.code == 401) throw AuthExpiredException()
-                if (!response.isSuccessful) throw IOException(messageOf(text, response.code))
-                JSONObject(text).getJSONObject("record").getString("id")
             }
         }
 
@@ -197,13 +291,11 @@ object PocketBaseApi {
                 .put("uses", 0)
                 .toString()
                 .toRequestBody(JSON_TYPE)
-
             val request = Request.Builder()
                 .url("$baseUrl/api/collections/invitations/records")
                 .header("Authorization", token)
                 .post(body)
                 .build()
-
             client.newCall(request).execute().use { response ->
                 val text = response.body?.string().orEmpty()
                 if (response.code == 401) throw AuthExpiredException()
@@ -229,13 +321,11 @@ object PocketBaseApi {
                 .put("status", "available")
                 .toString()
                 .toRequestBody(JSON_TYPE)
-
             val request = Request.Builder()
                 .url("$baseUrl/api/collections/items/records")
                 .header("Authorization", token)
                 .post(body)
                 .build()
-
             client.newCall(request).execute().use { response ->
                 val text = response.body?.string().orEmpty()
                 if (response.code == 401) throw AuthExpiredException()
@@ -252,7 +342,6 @@ object PocketBaseApi {
                 .header("Authorization", token)
                 .patch(body)
                 .build()
-
             client.newCall(request).execute().use { response ->
                 val text = response.body?.string().orEmpty()
                 if (response.code == 401) throw AuthExpiredException()
@@ -267,32 +356,160 @@ object PocketBaseApi {
                 .header("Authorization", token)
                 .delete()
                 .build()
-
             client.newCall(request).execute().use { response ->
                 val text = response.body?.string().orEmpty()
                 if (response.code == 401) throw AuthExpiredException()
                 if (!response.isSuccessful) throw IOException(messageOf(text, response.code))
             }
         }
-            suspend fun createCircle(baseUrl: String, token: String, name: String): String =
+
+    /** Prochain prêt (en cours ou réservé) d'un objet, ou null. */
+    suspend fun activeLoanInfo(baseUrl: String, token: String, itemId: String): ActiveLoan? =
         withContext(Dispatchers.IO) {
-            // Pas de champ members : le serveur y met le créateur automatiquement
-            val body = JSONObject()
-                .put("name", name.trim())
-                .toString()
-                .toRequestBody(JSON_TYPE)
-
+            val filter = URLEncoder.encode(
+                "item=\"$itemId\" && returned_at=\"\" && due_date>\"${DateUtils.pbNow()}\"", "UTF-8"
+            )
             val request = Request.Builder()
-                .url("$baseUrl/api/collections/circles/records")
+                .url("$baseUrl/api/collections/loans/records?perPage=1&sort=start_date&expand=borrower,lender&filter=$filter")
                 .header("Authorization", token)
-                .post(body)
+                .get()
                 .build()
-
             client.newCall(request).execute().use { response ->
                 val text = response.body?.string().orEmpty()
                 if (response.code == 401) throw AuthExpiredException()
                 if (!response.isSuccessful) throw IOException(messageOf(text, response.code))
-                JSONObject(text).getString("name")
+                val arr = JSONObject(text).getJSONArray("items")
+                if (arr.length() == 0) return@use null
+                val o = arr.getJSONObject(0)
+                val expand = o.optJSONObject("expand")
+                val borrower = expand?.optJSONObject("borrower")
+                val lender = expand?.optJSONObject("lender")
+                val start = o.optString("start_date")
+                ActiveLoan(
+                    id = o.getString("id"),
+                    borrowerId = o.optString("borrower"),
+                    lenderId = o.optString("lender"),
+                    borrowerName = borrower?.optString("name").orEmpty().ifBlank { "un membre" },
+                    lenderName = lender?.optString("name").orEmpty().ifBlank { "un membre" },
+                    startDate = start,
+                    dueDate = o.optString("due_date"),
+                    started = DateUtils.isPast(start)
+                )
+            }
+        }
+
+    suspend fun findActiveLoan(baseUrl: String, token: String, itemId: String): String? =
+        withContext(Dispatchers.IO) {
+            val filter = URLEncoder.encode("item=\"$itemId\" && returned_at=\"\"", "UTF-8")
+            val request = Request.Builder()
+                .url("$baseUrl/api/collections/loans/records?perPage=1&filter=$filter")
+                .header("Authorization", token)
+                .get()
+                .build()
+            client.newCall(request).execute().use { response ->
+                val text = response.body?.string().orEmpty()
+                if (response.code == 401) throw AuthExpiredException()
+                if (!response.isSuccessful) throw IOException(messageOf(text, response.code))
+                val arr = JSONObject(text).getJSONArray("items")
+                if (arr.length() == 0) null else arr.getJSONObject(0).getString("id")
+            }
+        }
+
+    suspend fun markReturned(baseUrl: String, token: String, loanId: String) =
+        withContext(Dispatchers.IO) {
+            val body = JSONObject()
+                .put("returned_at", DateUtils.pbNow())
+                .toString()
+                .toRequestBody(JSON_TYPE)
+            val request = Request.Builder()
+                .url("$baseUrl/api/collections/loans/records/$loanId")
+                .header("Authorization", token)
+                .patch(body)
+                .build()
+            client.newCall(request).execute().use { response ->
+                val text = response.body?.string().orEmpty()
+                if (response.code == 401) throw AuthExpiredException()
+                if (!response.isSuccessful) throw IOException(messageOf(text, response.code))
+            }
+        }
+
+    suspend fun createRequest(
+        baseUrl: String,
+        token: String,
+        itemId: String,
+        startUtc: String,
+        endUtc: String
+    ) =
+        withContext(Dispatchers.IO) {
+            val body = JSONObject()
+                .put("item", itemId)
+                .put("start_date", startUtc)
+                .put("due_date", endUtc)
+                .toString()
+                .toRequestBody(JSON_TYPE)
+            val request = Request.Builder()
+                .url("$baseUrl/api/collections/loan_requests/records")
+                .header("Authorization", token)
+                .post(body)
+                .build()
+            client.newCall(request).execute().use { response ->
+                val text = response.body?.string().orEmpty()
+                if (response.code == 401) throw AuthExpiredException()
+                if (!response.isSuccessful) throw IOException(messageOf(text, response.code))
+            }
+        }
+
+    suspend fun listRequests(baseUrl: String, token: String, filter: String): List<Req> =
+        withContext(Dispatchers.IO) {
+            val url = "$baseUrl/api/collections/loan_requests/records?perPage=100&sort=-created&expand=item,requester&filter=" +
+                URLEncoder.encode(filter, "UTF-8")
+            val request = Request.Builder().url(url).header("Authorization", token).get().build()
+            client.newCall(request).execute().use { response ->
+                val text = response.body?.string().orEmpty()
+                if (response.code == 401) throw AuthExpiredException()
+                if (!response.isSuccessful) throw IOException(messageOf(text, response.code))
+                val arr = JSONObject(text).getJSONArray("items")
+                List(arr.length()) { i ->
+                    val o = arr.getJSONObject(i)
+                    val exp = o.optJSONObject("expand")
+                    Req(
+                        id = o.getString("id"),
+                        itemTitle = exp?.optJSONObject("item")?.optString("title").orEmpty(),
+                        requesterId = o.optString("requester"),
+                        requesterName = exp?.optJSONObject("requester")?.optString("name").orEmpty(),
+                        ownerId = o.optString("owner"),
+                        status = o.optString("status")
+                    )
+                }
+            }
+        }
+
+    suspend fun respondRequest(baseUrl: String, token: String, requestId: String, status: String) =
+        withContext(Dispatchers.IO) {
+            val body = JSONObject().put("status", status).toString().toRequestBody(JSON_TYPE)
+            val request = Request.Builder()
+                .url("$baseUrl/api/collections/loan_requests/records/$requestId")
+                .header("Authorization", token)
+                .patch(body)
+                .build()
+            client.newCall(request).execute().use { response ->
+                val text = response.body?.string().orEmpty()
+                if (response.code == 401) throw AuthExpiredException()
+                if (!response.isSuccessful) throw IOException(messageOf(text, response.code))
+            }
+        }
+
+    suspend fun cancelRequest(baseUrl: String, token: String, requestId: String) =
+        withContext(Dispatchers.IO) {
+            val request = Request.Builder()
+                .url("$baseUrl/api/collections/loan_requests/records/$requestId")
+                .header("Authorization", token)
+                .delete()
+                .build()
+            client.newCall(request).execute().use { response ->
+                val text = response.body?.string().orEmpty()
+                if (response.code == 401) throw AuthExpiredException()
+                if (!response.isSuccessful) throw IOException(messageOf(text, response.code))
             }
         }
 }
