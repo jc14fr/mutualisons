@@ -194,6 +194,24 @@ object PocketBaseApi {
             }
         }
 
+    /** État réel des objets (available, reserved, lent, repair, hidden), calculé par le serveur. */
+    suspend fun itemStates(baseUrl: String, token: String, ids: List<String>): Map<String, String> =
+        withContext(Dispatchers.IO) {
+            if (ids.isEmpty()) return@withContext emptyMap()
+            val request = Request.Builder()
+                .url("$baseUrl/api/mutualisons/item-state?ids=${ids.joinToString(",")}")
+                .header("Authorization", token)
+                .get()
+                .build()
+            client.newCall(request).execute().use { response ->
+                val text = response.body?.string().orEmpty()
+                if (response.code == 401) throw AuthExpiredException()
+                if (!response.isSuccessful) throw IOException(messageOf(text, response.code))
+                val json = JSONObject(text)
+                json.keys().asSequence().associateWith { json.getJSONObject(it).getString("state") }
+            }
+        }
+
     suspend fun listCircles(baseUrl: String, token: String): List<Circle> =
         withContext(Dispatchers.IO) {
             val request = Request.Builder()
@@ -363,12 +381,10 @@ object PocketBaseApi {
             }
         }
 
-    /** Prochain prêt (en cours ou réservé) d'un objet, ou null. */
+    /** Prêt en cours ou à venir d'un objet (y compris en retard), ou null. */
     suspend fun activeLoanInfo(baseUrl: String, token: String, itemId: String): ActiveLoan? =
         withContext(Dispatchers.IO) {
-            val filter = URLEncoder.encode(
-                "item=\"$itemId\" && returned_at=\"\" && due_date>\"${DateUtils.pbNow()}\"", "UTF-8"
-            )
+            val filter = URLEncoder.encode("item=\"$itemId\" && returned_at=\"\"", "UTF-8")
             val request = Request.Builder()
                 .url("$baseUrl/api/collections/loans/records?perPage=1&sort=start_date&expand=borrower,lender&filter=$filter")
                 .header("Authorization", token)
@@ -398,33 +414,28 @@ object PocketBaseApi {
             }
         }
 
-    suspend fun findActiveLoan(baseUrl: String, token: String, itemId: String): String? =
+    suspend fun markReturned(baseUrl: String, token: String, loanId: String) =
         withContext(Dispatchers.IO) {
-            val filter = URLEncoder.encode("item=\"$itemId\" && returned_at=\"\"", "UTF-8")
+            val body = JSONObject().put("loan", loanId).toString().toRequestBody(JSON_TYPE)
             val request = Request.Builder()
-                .url("$baseUrl/api/collections/loans/records?perPage=1&filter=$filter")
+                .url("$baseUrl/api/mutualisons/return")
                 .header("Authorization", token)
-                .get()
+                .post(body)
                 .build()
             client.newCall(request).execute().use { response ->
                 val text = response.body?.string().orEmpty()
                 if (response.code == 401) throw AuthExpiredException()
                 if (!response.isSuccessful) throw IOException(messageOf(text, response.code))
-                val arr = JSONObject(text).getJSONArray("items")
-                if (arr.length() == 0) null else arr.getJSONObject(0).getString("id")
             }
         }
 
-    suspend fun markReturned(baseUrl: String, token: String, loanId: String) =
+    suspend fun reopenLoan(baseUrl: String, token: String, loanId: String) =
         withContext(Dispatchers.IO) {
-            val body = JSONObject()
-                .put("returned_at", DateUtils.pbNow())
-                .toString()
-                .toRequestBody(JSON_TYPE)
+            val body = JSONObject().put("loan", loanId).toString().toRequestBody(JSON_TYPE)
             val request = Request.Builder()
-                .url("$baseUrl/api/collections/loans/records/$loanId")
+                .url("$baseUrl/api/mutualisons/reopen")
                 .header("Authorization", token)
-                .patch(body)
+                .post(body)
                 .build()
             client.newCall(request).execute().use { response ->
                 val text = response.body?.string().orEmpty()

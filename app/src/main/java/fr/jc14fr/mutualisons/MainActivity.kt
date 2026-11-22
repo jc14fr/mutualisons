@@ -32,7 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 
-class MainActivity : androidx.activity.ComponentActivity() {
+class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -43,6 +43,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
                     val token by ServerSettings.token(context).collectAsState(initial = "")
                     var screen by remember { mutableStateOf("items") }
                     var showChangelog by remember { mutableStateOf(false) }
+                    var showPrivacy by remember { mutableStateOf(false) }
 
                     val loggedIn = !url.isNullOrEmpty() && !token.isNullOrEmpty()
 
@@ -53,6 +54,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
                                     selected = screen,
                                     onSelect = {
                                         showChangelog = false
+                                        showPrivacy = false
                                         screen = it
                                     }
                                 )
@@ -69,6 +71,13 @@ class MainActivity : androidx.activity.ComponentActivity() {
                                         modifier = Modifier.fillMaxWidth().padding(16.dp)
                                     ) { Text("Retour aux réglages") }
                                     ChangelogScreen()
+                                }
+                                showPrivacy -> Column {
+                                    Button(
+                                        onClick = { showPrivacy = false },
+                                        modifier = Modifier.fillMaxWidth().padding(16.dp)
+                                    ) { Text("Retour aux réglages") }
+                                    PrivacyScreen()
                                 }
                                 else -> when (screen) {
                                     "add" -> AddItemScreen(
@@ -90,7 +99,8 @@ class MainActivity : androidx.activity.ComponentActivity() {
                                         baseUrl = url.orEmpty(),
                                         token = token.orEmpty(),
                                         onSessionExpired = {},
-                                        onOpenChangelog = { showChangelog = true }
+                                        onOpenChangelog = { showChangelog = true },
+                                        onOpenPrivacy = { showPrivacy = true }
                                     )
                                     else -> ItemsScreen(
                                         baseUrl = url.orEmpty(),

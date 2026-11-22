@@ -22,6 +22,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -48,16 +50,17 @@ private fun categoryLabel(c: String): String = when (c) {
     else -> "Autre"
 }
 
-private fun statusLabel(status: String): String = when (status) {
+/** Libellé à partir de l'état calculé par le serveur (et non de items.status). */
+private fun stateLabel(state: String): String = when (state) {
     "available" -> "Disponible"
     "lent" -> "Prêté"
     "reserved" -> "Réservé"
     "repair" -> "En réparation"
     "hidden" -> "Masqué"
-    else -> status
+    else -> state
 }
 
-private fun statusColor(status: String): Color = when (status) {
+private fun stateColor(state: String): Color = when (state) {
     "available" -> Color(0xFF2E7D32)
     "lent" -> Color(0xFFEF6C00)
     "reserved" -> Color(0xFF1565C0)
@@ -77,7 +80,9 @@ fun ItemsScreen(
     var list by remember { mutableStateOf<List<PocketBaseApi.Item>>(emptyList()) }
     var circles by remember { mutableStateOf<List<PocketBaseApi.Circle>>(emptyList()) }
     var loans by remember { mutableStateOf<Map<String, PocketBaseApi.ActiveLoan>>(emptyMap()) }
+    var states by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var expanded by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var tab by remember { mutableIntStateOf(0) }
     var me by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var info by remember { mutableStateOf<String?>(null) }
@@ -101,6 +106,7 @@ fun ItemsScreen(
             loans = list.mapNotNull { item ->
                 PocketBaseApi.activeLoanInfo(baseUrl, token, item.id)?.let { item.id to it }
             }.toMap()
+            states = PocketBaseApi.itemStates(baseUrl, token, list.map { it.id })
         } catch (e: AuthExpiredException) {
             ServerSettings.clearToken(context)
             onSessionExpired()
@@ -249,6 +255,10 @@ fun ItemsScreen(
         )
     }
 
+    val mine = list.filter { it.owner == me }
+    val others = list.filter { it.owner != me }
+    val shown = if (tab == 0) mine else others
+
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -260,6 +270,13 @@ fun ItemsScreen(
                 Icon(Icons.Filled.Refresh, contentDescription = "Actualiser")
             }
         }
+
+        TabRow(selectedTabIndex = tab) {
+            Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Mes objets (${mine.size})") })
+            Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Des autres (${others.size})") })
+        }
+
+        Spacer(Modifier.height(8.dp))
 
         info?.let {
             Text(it, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium)
@@ -276,133 +293,166 @@ fun ItemsScreen(
                 CircularProgressIndicator()
             }
 
-            list.isEmpty() && error == null -> Column(
+            shown.isEmpty() && error == null -> Column(
                 modifier = Modifier.fillMaxWidth().padding(top = 48.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text("Aucun objet pour le moment", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "Ajoutez vos livres, outils, DVD ou appareils, et partagez-les avec vos cercles.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.height(16.dp))
-                Button(onClick = onAddClick) { Text("Ajouter un objet") }
+                if (tab == 0) {
+                    Text("Vous n'avez pas encore d'objet", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Ajoutez vos livres, outils, DVD ou appareils, et partagez-les avec vos cercles.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Button(onClick = onAddClick) { Text("Ajouter un objet") }
+                } else {
+                    Text("Aucun objet partagé avec vous pour le moment", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Les objets des membres de vos cercles apparaîtront ici.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
             else -> LazyColumn(modifier = Modifier.weight(1f)) {
-                items(list, key = { it.id }) { item ->
-                    val ln = loans[item.id]
-                    val isOpen = item.id in expanded
-                    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    expanded = if (isOpen) expanded - item.id else expanded + item.id
+                items(shown, key = { it.id }) { item ->
+                    ItemCard(
+                        item = item,
+                        me = me,
+                        state = states[item.id] ?: item.status,
+                        loan = loans[item.id],
+                        isOpen = item.id in expanded,
+                        onToggle = {
+                            expanded = if (item.id in expanded) expanded - item.id else expanded + item.id
+                        },
+                        onShare = {
+                            selected = item.circles.toSet()
+                            toShare = item
+                        },
+                        onDelete = { toDelete = item },
+                        onRequest = {
+                            reqStart = DateUtils.frDansJours(0)
+                            reqEnd = DateUtils.frDansJours(7)
+                            reqError = null
+                            toRequest = item
+                        },
+                        onReturn = { loanId ->
+                            scope.launch {
+                                try {
+                                    PocketBaseApi.markReturned(baseUrl, token, loanId)
+                                    info = "« ${item.title} » marqué rendu."
+                                    error = null
+                                    reload++
+                                } catch (e: AuthExpiredException) {
+                                    ServerSettings.clearToken(context)
+                                    onSessionExpired()
+                                } catch (e: Exception) {
+                                    error = "Retour impossible : ${e.message}"
                                 }
-                                .padding(16.dp)
-                        ) {
-                            Text(item.title, style = MaterialTheme.typography.titleMedium)
-
-                            if (isOpen) {
-                                Spacer(Modifier.height(4.dp))
-                                val partage = if (item.circles.isEmpty()) "Privé" else "${item.circles.size} cercle(s)"
-                                Text(
-                                    "${categoryLabel(item.category)} · $partage",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                    Text(
-                                    if (item.owner == me) "Appartient à vous"
-                                    else "Appartient à ${item.ownerName.ifBlank { "un membre" }}",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(Modifier.height(4.dp))
-                                Text(
-                                    statusLabel(item.status),
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = statusColor(item.status)
-                                )
-
-                                if (ln != null) {
-                                    val ligne = when {
-                                        ln.lenderId == me && ln.borrowerId == me -> null
-                                        ln.lenderId == me -> "Prêté à ${ln.borrowerName}"
-                                        ln.borrowerId == me -> "Prêté par ${ln.lenderName}"
-                                        else -> "Prêté par ${ln.lenderName} à ${ln.borrowerName}"
-                                    }
-                                    ligne?.let {
-                                        Spacer(Modifier.height(2.dp))
-                                        Text(
-                                            it,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-
-                                    val periode = "du ${DateUtils.dateFr(ln.startDate)} au ${DateUtils.dateFr(ln.dueDate)}"
-                                    val texte = when {
-                                        item.owner == me && ln.started -> "Jusqu'au ${DateUtils.dateFr(ln.dueDate)}"
-                                        item.owner == me -> "Réservé $periode"
-                                        ln.borrowerId == me && ln.started -> "À rendre le ${DateUtils.dateFr(ln.dueDate)}"
-                                        ln.borrowerId == me -> "Vous avez réservé $periode"
-                                        else -> "Indisponible $periode"
-                                    }
-                                    Text(texte, style = MaterialTheme.typography.bodyMedium)
-                                }
-
-                                if (item.owner == me) {
-                                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
-                                        TextButton(onClick = {
-                                            selected = item.circles.toSet()
-                                            toShare = item
-                                        }) { Text("Partager") }
-                                        TextButton(onClick = { toDelete = item }) { Text("Supprimer") }
-                                    }
-                                }
-
-                                if (item.owner == me && ln != null && ln.started) {
-                                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
-                                        TextButton(onClick = {
-                                            scope.launch {
-                                                try {
-                                                    PocketBaseApi.markReturned(baseUrl, token, ln.id)
-                                                    info = "« ${item.title} » marqué rendu."
-                                                    reload++
-                                                } catch (e: AuthExpiredException) {
-                                                    ServerSettings.clearToken(context)
-                                                    onSessionExpired()
-                                                } catch (e: Exception) {
-                                                    error = e.message
-                                                }
-                                            }
-                                        }) { Text("Marquer rendu") }
-                                    }
-                                }
-
-                                if (item.owner != me && item.status != "hidden") {
-                                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
-                                        TextButton(onClick = {
-                                            reqStart = DateUtils.frDansJours(0)
-                                            reqEnd = DateUtils.frDansJours(7)
-                                            reqError = null
-                                            toRequest = item
-                                        }) { Text("Demander") }
-                                    }
-                                }
-                            } else {
-                                // Vue réduite : on indique seulement si l'objet est disponible
-                                Text(
-                                    statusLabel(item.status),
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = statusColor(item.status)
-                                )
                             }
                         }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ItemCard(
+    item: PocketBaseApi.Item,
+    me: String,
+    state: String,
+    loan: PocketBaseApi.ActiveLoan?,
+    isOpen: Boolean,
+    onToggle: () -> Unit,
+    onShare: () -> Unit,
+    onDelete: () -> Unit,
+    onRequest: () -> Unit,
+    onReturn: (String) -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onToggle)
+                .padding(16.dp)
+        ) {
+            Text(item.title, style = MaterialTheme.typography.titleMedium)
+
+            if (!isOpen) {
+                Text(
+                    stateLabel(state),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = stateColor(state)
+                )
+                return@Column
+            }
+
+            Spacer(Modifier.height(4.dp))
+            val partage = if (item.circles.isEmpty()) "Privé" else "${item.circles.size} cercle(s)"
+            Text(
+                "${categoryLabel(item.category)} · $partage",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                if (item.owner == me) "Appartient à vous"
+                else "Appartient à ${item.ownerName.ifBlank { "un membre" }}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                stateLabel(state),
+                style = MaterialTheme.typography.labelLarge,
+                color = stateColor(state)
+            )
+
+            if (loan != null) {
+                val ligne = when {
+                    loan.lenderId == me && loan.borrowerId == me -> null
+                    loan.lenderId == me -> "Prêté à ${loan.borrowerName}"
+                    loan.borrowerId == me -> "Prêté par ${loan.lenderName}"
+                    else -> "Prêté par ${loan.lenderName} à ${loan.borrowerName}"
+                }
+                ligne?.let {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                val periode = "du ${DateUtils.dateFr(loan.startDate)} au ${DateUtils.dateFr(loan.dueDate)}"
+                val texte = when {
+                    item.owner == me && loan.started -> "Jusqu'au ${DateUtils.dateFr(loan.dueDate)}"
+                    item.owner == me -> "Réservé $periode"
+                    loan.borrowerId == me && loan.started -> "À rendre le ${DateUtils.dateFr(loan.dueDate)}"
+                    loan.borrowerId == me -> "Vous avez réservé $periode"
+                    else -> "Indisponible $periode"
+                }
+                Text(texte, style = MaterialTheme.typography.bodyMedium)
+            }
+
+            if (item.owner == me) {
+                Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                    TextButton(onClick = onShare) { Text("Partager") }
+                    TextButton(onClick = onDelete) { Text("Supprimer") }
+                }
+                if (loan != null && loan.started) {
+                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                        TextButton(onClick = { onReturn(loan.id) }) { Text("Marquer rendu") }
                     }
+                }
+            } else if (item.status != "hidden") {
+                Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                    TextButton(onClick = onRequest) { Text("Demander") }
                 }
             }
         }

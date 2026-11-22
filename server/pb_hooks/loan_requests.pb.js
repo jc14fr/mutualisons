@@ -13,15 +13,15 @@ onRecordCreateRequest((e) => {
 
     let item;
     try {
-        item = $app.findRecordById("items", e.record.get("item"));
+        item = $app.findRecordById("items", e.record.getString("item"));
     } catch (err) {
         throw new BadRequestError("Objet introuvable.");
     }
 
-    if (item.get("owner") === e.auth.id) {
+    if (item.getString("owner") === e.auth.id) {
         throw new BadRequestError("Vous êtes le propriétaire de cet objet.");
     }
-    if (item.get("status") === "hidden") {
+    if (item.getString("status") === "hidden") {
         throw new BadRequestError("Cet objet n'est pas disponible au prêt.");
     }
 
@@ -33,8 +33,8 @@ onRecordCreateRequest((e) => {
         throw new BadRequestError("Cet objet n'est pas partagé avec vos cercles.");
     }
 
-    const debut = parseDate(e.record.get("start_date"));
-    const fin = parseDate(e.record.get("due_date"));
+    const debut = parseDate(e.record.getString("start_date"));
+    const fin = parseDate(e.record.getString("due_date"));
     if (isNaN(debut.getTime()) || isNaN(fin.getTime())) {
         throw new BadRequestError("Dates invalides.");
     }
@@ -60,7 +60,7 @@ onRecordCreateRequest((e) => {
     }
 
     e.record.set("requester", e.auth.id);
-    e.record.set("owner", item.get("owner"));
+    e.record.set("owner", item.getString("owner"));
     e.record.set("status", "pending");
     e.next();
 }, "loan_requests");
@@ -78,22 +78,22 @@ onRecordUpdateRequest((e) => {
         return prets.length > 0;
     };
 
-    const avant = e.record.original().get("status");
-    const apres = e.record.get("status");
+    const avant = e.record.original().getString("status");
+    const apres = e.record.getString("status");
 
     if (avant === apres || avant !== "pending") {
         e.next();
         return;
     }
 
-    if (!e.hasSuperuserAuth() && e.auth.id !== e.record.get("owner")) {
+    if (!e.hasSuperuserAuth() && e.auth.id !== e.record.getString("owner")) {
         throw new BadRequestError("Seul le propriétaire peut répondre à cette demande.");
     }
 
     if (apres === "accepted") {
-        const item = $app.findRecordById("items", e.record.get("item"));
-        const debut = parseDate(e.record.get("start_date"));
-        const fin = parseDate(e.record.get("due_date"));
+        const item = $app.findRecordById("items", e.record.getString("item"));
+        const debut = parseDate(e.record.getString("start_date"));
+        const fin = parseDate(e.record.getString("due_date"));
 
         if (conflit(item.id, debut, fin)) {
             throw new BadRequestError("Ces dates chevauchent un prêt déjà accepté.");
@@ -103,17 +103,11 @@ onRecordUpdateRequest((e) => {
 
         const loan = new Record($app.findCollectionByNameOrId("loans"));
         loan.set("item", item.id);
-        loan.set("lender", e.record.get("owner"));
-        loan.set("borrower", e.record.get("requester"));
+        loan.set("lender", e.record.getString("owner"));
+        loan.set("borrower", e.record.getString("requester"));
         loan.set("start_date", pbDate(debut));
         loan.set("due_date", pbDate(fin));
         $app.save(loan);
-
-        // Le statut "prêté" ne s'applique qu'à partir du début du prêt
-        if (debut <= new Date()) {
-            item.set("status", "lent");
-            $app.save(item);
-        }
         return;
     }
 

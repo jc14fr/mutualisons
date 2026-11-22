@@ -36,7 +36,8 @@ fun SettingsScreen(
     baseUrl: String,
     token: String,
     onSessionExpired: () -> Unit,
-    onOpenChangelog: () -> Unit
+    onOpenChangelog: () -> Unit,
+    onOpenPrivacy: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -214,6 +215,11 @@ fun SettingsScreen(
                     onClick = onOpenChangelog,
                     modifier = Modifier.fillMaxWidth()
                 ) { Text("Journal des modifications") }
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = onOpenPrivacy,
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Confidentialité") }
             }
         }
     }

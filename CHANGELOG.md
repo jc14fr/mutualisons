@@ -1,5 +1,9 @@
 # Journal des modifications
 
+## 1.3.1
+- Objets : onglets « Mes objets » et « Des autres ».
+- Correction : « Marquer rendu » fonctionne aussi pour un prêt en retard.
+
 ## 1.3.0
 - Objets : fiche réduite (titre seul), tap pour déplier les détails.
 - Objets : « Appartient à vous » ou « Appartient à <nom> », « Prêté par… » sur chaque fiche.
