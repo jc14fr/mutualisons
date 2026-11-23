@@ -14,3 +14,7 @@ L'application demande l'adresse du serveur au premier lancement.
 ## Licence
 
 GPL-3.0-or-later. Voir [LICENSE](LICENSE).
+
+## Confidentialité
+
+Voir [PRIVACY.md](PRIVACY.md).
