@@ -56,7 +56,7 @@ private fun stateLabel(state: String): String = when (state) {
     "lent" -> "Prêté"
     "reserved" -> "Réservé"
     "repair" -> "En réparation"
-    "hidden" -> "Masqué"
+    "hidden" -> "Indisponible"
     else -> state
 }
 
@@ -354,6 +354,23 @@ fun ItemsScreen(
                                     error = "Retour impossible : ${e.message}"
                                 }
                             }
+                        },
+                        onToggleAvailability = {
+                            val newStatus = if (item.status == "hidden") "available" else "hidden"
+                            scope.launch {
+                                try {
+                                    PocketBaseApi.setItemStatus(baseUrl, token, item.id, newStatus)
+                                    info = if (newStatus == "hidden") "« ${item.title} » est indisponible."
+                                           else "« ${item.title} » est de nouveau disponible."
+                                    error = null
+                                    reload++
+                                } catch (e: AuthExpiredException) {
+                                    ServerSettings.clearToken(context)
+                                    onSessionExpired()
+                                } catch (e: Exception) {
+                                    error = "Changement impossible : ${e.message}"
+                                }
+                            }
                         }
                     )
                 }
@@ -373,7 +390,8 @@ private fun ItemCard(
     onShare: () -> Unit,
     onDelete: () -> Unit,
     onRequest: () -> Unit,
-    onReturn: (String) -> Unit
+    onReturn: (String) -> Unit,
+    onToggleAvailability: () -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
         Column(
@@ -448,6 +466,13 @@ private fun ItemCard(
                 if (loan != null && loan.started) {
                     Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
                         TextButton(onClick = { onReturn(loan.id) }) { Text("Marquer rendu") }
+                    }
+                }
+                if (loan == null || !loan.started) {
+                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                        TextButton(onClick = onToggleAvailability) {
+                            Text(if (item.status == "hidden") "Remettre disponible" else "Rendre indisponible")
+                        }
                     }
                 }
             } else if (item.status != "hidden") {

@@ -14,6 +14,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 private val CHANGELOG = listOf(
+    "1.4.0" to listOf(
+        "État des objets calculé à partir des prêts (disponible, réservé, prêté).",
+        "Suppression bloquée pour un objet prêté.",
+        "Propriétaire : bouton « Rendre indisponible » / « Remettre disponible ».",
+        "Retour de prêt et réouverture gérés par le serveur.",
+        "Code interne réorganisé."
+    ),
+
     "1.3.0" to listOf(
         "Objets : fiche réduite, tap pour déplier les détails.",
         "Objets : propriétaire et prêts affichés sur chaque fiche.",

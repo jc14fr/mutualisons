@@ -1,5 +1,13 @@
 # Journal des modifications
 
+
+## 1.4.0
+- État des objets calculé à partir des prêts (disponible, réservé, prêté), plus de statut « prêté » figé.
+- Blocage de la suppression d'un objet prêté, vérifié à partir des prêts.
+- Propriétaire : bouton « Rendre indisponible » / « Remettre disponible » (hors prêt en cours).
+- Retour de prêt et réouverture gérés par le serveur, avec contrôle du propriétaire.
+- Code interne réorganisé (appels API unifiés, gestion de session commune).
+
 ## 1.3.1
 - Objets : onglets « Mes objets » et « Des autres ».
 - Correction : « Marquer rendu » fonctionne aussi pour un prêt en retard.
